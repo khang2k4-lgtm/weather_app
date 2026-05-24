@@ -638,7 +638,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   double _zoom = kDefaultZoom;
 
-  bool _showMap = false;
+  bool _showMap = true;
 
   // bool _isFirstFix = true;
 
