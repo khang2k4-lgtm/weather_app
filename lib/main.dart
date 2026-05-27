@@ -6,6 +6,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:ui';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:diacritic/diacritic.dart';
 
 // ─────────────────────────────────────────────────────────
 // CONFIG
@@ -15,8 +17,25 @@ const String owmApiKey =
 const LatLng kDefaultCenter = LatLng(21.0285, 105.8412); // Hà Nội
 const double kDefaultZoom = 14.0;
 
-void main() {
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
+
+Future<void> initNotification() async {
+  const AndroidInitializationSettings androidInitializationSettings =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+
+  const InitializationSettings initializationSettings = InitializationSettings(
+    android: androidInitializationSettings,
+  );
+
+  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+}
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await initNotification();
+
   runApp(const WeatherMapApp());
 }
 
@@ -107,23 +126,16 @@ bool isNight(int sunrise, int sunset) {
   return now < sunrise || now > sunset;
 }
 
-const _shortDays = [
-  'Thứ Hai',
-  'Thứ Ba',
-  'Thứ Tư',
-  'Thứ Năm',
-  'Thứ Sáu',
-  'Thứ Bảy',
-  'Chủ Nhật',
-];
+const _shortDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
 const _fullDays = [
-  'Thứ Hai',
-  'Thứ Ba',
-  'Thứ Tư',
-  'Thứ Năm',
-  'Thứ Sáu',
-  'Thứ Bảy',
-  'Chủ Nhật',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday',
 ];
 
 String todayLabel() {
@@ -154,7 +166,7 @@ Widget _weatherDetails(WeatherData w) {
       child: Row(
         children: [
           Icon(icon, color: Colors.white60, size: 16),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -630,10 +642,13 @@ class _HomeScreenState extends State<HomeScreen>
 
   LatLng? _userLoc;
   LatLng? _selectedLoc;
+  String? _weatherAlert;
+  List<LatLng> _routePoints = [];
 
   bool _isTracking = false;
   bool _loadingWeather = false;
   bool _pickWeatherMode = false;
+  bool _weatherOptimized = false;
   WeatherData? _weather;
 
   double _zoom = kDefaultZoom;
@@ -663,6 +678,216 @@ class _HomeScreenState extends State<HomeScreen>
     _posSub?.cancel();
     _pulseCtrl.dispose();
     super.dispose();
+  }
+
+  //Hàm
+  //resec
+  void _resetApp() {
+    // tắt tracking
+    _posSub?.cancel();
+    _pulseCtrl.stop();
+
+    setState(() {
+      // reset vị trí
+      _userLoc = null;
+      _selectedLoc = null;
+
+      // reset weather
+      _weather = null;
+      _weatherAlert = null;
+
+      // reset route
+      _routePoints.clear();
+
+      // reset mode
+      _isTracking = false;
+      _loadingWeather = false;
+      _pickWeatherMode = false;
+      _weatherOptimized = false;
+
+      // reset zoom
+      _zoom = kDefaultZoom;
+
+      // clear saved
+      _savedLocations.clear();
+    });
+
+    // move map về mặc định
+    _mapCtrl.move(kDefaultCenter, kDefaultZoom);
+
+    _toast('🔄 Đã làm mới ứng dụng');
+  }
+
+  //Tranh thoi tiet
+  Future<void> _createWeatherOptimizedRoute() async {
+    if (_userLoc == null || _selectedLoc == null) {
+      _toast('⚠ Hãy chọn điểm đến');
+      return;
+    }
+
+    try {
+      setState(() {
+        _loadingWeather = true;
+      });
+
+      final start = _userLoc!;
+      final end = _selectedLoc!;
+
+      // midpoint
+      double midLat = (start.latitude + end.latitude) / 2;
+      double midLon = (start.longitude + end.longitude) / 2;
+
+      // check thời tiết giữa đường
+      final weather = await fetchWeather(midLat, midLon);
+
+      bool badWeather =
+          weather.rain > 0.3 ||
+          weather.temp >= 35 ||
+          weather.desc.toLowerCase().contains('mưa');
+
+      String url;
+
+      // nếu thời tiết xấu → tạo waypoint lệch hướng
+      if (badWeather) {
+        // tạo waypoint né lệch sang bên
+        final avoidLat = midLat + 0.03;
+        final avoidLon = midLon - 0.03;
+
+        url =
+            'https://router.project-osrm.org/route/v1/driving/'
+            '${start.longitude},${start.latitude};'
+            '$avoidLon,$avoidLat;'
+            '${end.longitude},${end.latitude}'
+            '?overview=full&geometries=geojson';
+      } else {
+        // route bình thường
+        url =
+            'https://router.project-osrm.org/route/v1/driving/'
+            '${start.longitude},${start.latitude};'
+            '${end.longitude},${end.latitude}'
+            '?overview=full&geometries=geojson';
+      }
+
+      final res = await http.get(Uri.parse(url));
+
+      if (res.statusCode != 200) {
+        setState(() {
+          _loadingWeather = false;
+        });
+
+        _toast('❌ Không lấy được tuyến đường');
+        return;
+      }
+
+      final data = jsonDecode(res.body);
+
+      // FIX QUAN TRỌNG
+      if (data['routes'] == null || data['routes'].isEmpty) {
+        // fallback route thường
+        await _createRoute();
+
+        setState(() {
+          _loadingWeather = false;
+        });
+
+        _toast('⚠ Không tìm được đường né thời tiết → dùng tuyến thường');
+        return;
+      }
+
+      final coords = data['routes'][0]['geometry']['coordinates'] as List;
+
+      final points = coords.map<LatLng>((e) {
+        return LatLng((e[1] as num).toDouble(), (e[0] as num).toDouble());
+      }).toList();
+
+      // FIX: không set route rỗng
+      if (points.isEmpty) {
+        await _createRoute();
+
+        setState(() {
+          _loadingWeather = false;
+        });
+
+        _toast('⚠ Route tối ưu bị lỗi → dùng tuyến thường');
+        return;
+      }
+
+      setState(() {
+        _routePoints = points;
+        _weatherOptimized = badWeather;
+        _loadingWeather = false;
+      });
+
+      if (badWeather) {
+        _toast('🌦 Đã tối ưu tuyến đường tránh thời tiết xấu');
+      } else {
+        _toast('✅ Thời tiết ổn, dùng tuyến chuẩn');
+      }
+    } catch (e) {
+      setState(() {
+        _loadingWeather = false;
+      });
+
+      // fallback route thường
+      await _createRoute();
+
+      _toast('⚠ Lỗi tối ưu thời tiết → chuyển sang tuyến thường');
+    }
+  }
+  //Chỉ đường
+
+  // ─────────────────────────────────────────────
+  // TẠO TUYẾN ĐƯỜNG THƯỜNG
+  // ─────────────────────────────────────────────
+  Future<void> _createRoute() async {
+    if (_userLoc == null || _selectedLoc == null) {
+      _toast('⚠ Hãy chọn điểm đi và điểm đến');
+      return;
+    }
+
+    try {
+      setState(() {
+        _loadingWeather = true;
+      });
+
+      final start = _userLoc!;
+      final end = _selectedLoc!;
+
+      final url =
+          'https://router.project-osrm.org/route/v1/driving/'
+          '${start.longitude},${start.latitude};'
+          '${end.longitude},${end.latitude}'
+          '?overview=full&geometries=geojson';
+
+      final res = await http.get(Uri.parse(url));
+
+      if (res.statusCode != 200) {
+        _toast('❌ Không lấy được tuyến đường');
+        return;
+      }
+
+      final data = jsonDecode(res.body);
+
+      final coords = data['routes'][0]['geometry']['coordinates'] as List;
+
+      final points = coords.map((e) {
+        return LatLng(e[1], e[0]);
+      }).toList();
+
+      setState(() {
+        _routePoints = points;
+        _weatherOptimized = false;
+        _loadingWeather = false;
+      });
+
+      _toast('🛣 Đã tạo tuyến đường');
+    } catch (e) {
+      setState(() {
+        _loadingWeather = false;
+      });
+
+      _toast('❌ Lỗi tạo tuyến đường');
+    }
   }
 
   // ─────────────────────────────────────────────
@@ -737,10 +962,11 @@ class _HomeScreenState extends State<HomeScreen>
         _userLoc = loc;
         _selectedLoc = loc;
         _weather = w;
+
         _zoom = 16;
         _loadingWeather = false;
       });
-
+      _checkWeatherAlert(w);
       _toast('📍 ${w.city}');
 
       // stream vị trí realtime
@@ -811,23 +1037,95 @@ class _HomeScreenState extends State<HomeScreen>
   // ─────────────────────────────────────────────
   // SEARCH LOCATION
   // ─────────────────────────────────────────────
-  Future<LatLng?> searchLocation(String query) async {
+  // Future<LatLng?> searchLocation(String query) async {
+  //   try {
+  //     final res = await http.get(
+  //       Uri.parse(
+  //         'https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=1',
+  //       ),
+  //       headers: {'User-Agent': 'weather-app'},
+  //     );
+
+  //     if (res.statusCode != 200) return null;
+
+  //     final data = jsonDecode(res.body);
+
+  //     if (data.isEmpty) return null;
+
+  //     final lat = double.parse(data[0]['lat']);
+  //     final lon = double.parse(data[0]['lon']);
+
+  //     return LatLng(lat, lon);
+  //   } catch (e) {
+  //     return null;
+  //   }
+  // }
+
+  // ─────────────────────────────────────────────
+  String normalizeVietnamese(String text) {
+    return removeDiacritics(text.toLowerCase()).trim();
+  }
+
+  // ─────────────────────────────────────────────
+  // SEARCH PLACE
+  // ─────────────────────────────────────────────
+  Future<List<Map<String, dynamic>>> searchSuggestions(String query) async {
+    if (query.trim().isEmpty) return [];
+
     try {
+      final normalized = normalizeVietnamese(query);
+
+      final url = Uri.https('nominatim.openstreetmap.org', '/search', {
+        'q': normalized,
+        'format': 'jsonv2',
+        'addressdetails': '1',
+        'limit': '10',
+        'countrycodes': 'vn',
+      });
+
       final res = await http.get(
-        Uri.parse(
-          'https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=1',
-        ),
-        headers: {'User-Agent': 'weather-app'},
+        url,
+        headers: {'User-Agent': 'weather-app', 'Accept-Language': 'vi'},
       );
 
-      if (res.statusCode != 200) return null;
+      if (res.statusCode != 200) {
+        return [];
+      }
 
       final data = jsonDecode(res.body);
 
-      if (data.isEmpty) return null;
+      if (data == null || data.isEmpty) {
+        return [];
+      }
 
-      final lat = double.parse(data[0]['lat']);
-      final lon = double.parse(data[0]['lon']);
+      // lọc kết quả gần giống query nhất
+      final filtered = List<Map<String, dynamic>>.from(data).where((item) {
+        final name = normalizeVietnamese(item['display_name'] ?? '');
+
+        return name.contains(normalized);
+      }).toList();
+
+      return filtered;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  // SEARCH LOCATION
+  // ─────────────────────────────────────────────
+  Future<LatLng?> searchLocation(String query) async {
+    try {
+      final results = await searchSuggestions(query);
+
+      if (results.isEmpty) {
+        return null;
+      }
+
+      final first = results.first;
+
+      final lat = double.parse(first['lat']);
+      final lon = double.parse(first['lon']);
 
       return LatLng(lat, lon);
     } catch (e) {
@@ -839,75 +1137,520 @@ class _HomeScreenState extends State<HomeScreen>
   // SEARCH DIALOG
   // ─────────────────────────────────────────────
   Future<void> _showSearchDialog() async {
-    final TextEditingController controller = TextEditingController();
+    final controller = TextEditingController();
 
-    showDialog(
+    List<Map<String, dynamic>> suggestions = [];
+
+    bool isLoading = false;
+
+    await showDialog(
       context: context,
+      barrierColor: Colors.black54,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('Thêm khu vực'),
-
-          content: TextField(
-            controller: controller,
-            decoration: const InputDecoration(
-              hintText: 'Nhập tên thành phố...',
-            ),
-          ),
-
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
-              child: const Text('Hủy'),
-            ),
-
-            TextButton(
-              onPressed: () async {
-                final text = controller.text.trim();
-
-                if (text.isEmpty) return;
-
-                Navigator.pop(context);
-
-                setState(() {
-                  _loadingWeather = true;
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            Future<void> search(String value) async {
+              if (value.trim().isEmpty) {
+                setModalState(() {
+                  suggestions = [];
                 });
+                return;
+              }
 
-                final loc = await searchLocation(text);
+              setModalState(() {
+                isLoading = true;
+              });
 
-                if (loc == null) {
-                  _toast('❌ Không tìm thấy địa điểm');
+              final result = await searchSuggestions(value);
 
-                  setState(() {
-                    _loadingWeather = false;
-                  });
+              setModalState(() {
+                suggestions = result;
+                isLoading = false;
+              });
+            }
 
-                  return;
-                }
+            Future<void> selectPlace(Map<String, dynamic> item) async {
+              Navigator.pop(context);
+
+              setState(() {
+                _loadingWeather = true;
+              });
+
+              try {
+                final lat = double.parse(item['lat']);
+                final lon = double.parse(item['lon']);
+
+                final loc = LatLng(lat, lon);
 
                 _mapCtrl.move(loc, 14);
 
-                _zoom = 14;
-
-                final w = await fetchWeather(loc.latitude, loc.longitude);
+                final w = await fetchWeather(lat, lon);
 
                 setState(() {
                   _weather = w;
-                  _userLoc = loc;
+                  _selectedLoc = loc;
                   _loadingWeather = false;
 
-                  // thêm vào danh sách
                   if (!_savedLocations.any((e) => e.city == w.city)) {
                     _savedLocations.add(w);
                   }
                 });
 
+                _checkWeatherAlert(w);
+
                 _toast('📍 ${w.city}');
-              },
-              child: const Text('Thêm'),
-            ),
-          ],
+              } catch (e) {
+                setState(() {
+                  _loadingWeather = false;
+                });
+
+                _toast('❌ Không tìm thấy địa điểm');
+              }
+            }
+
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              child: Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF152840),
+                  borderRadius: BorderRadius.circular(24),
+                ),
+
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.search, color: Colors.white),
+                        SizedBox(width: 10),
+                        Text(
+                          'Tìm địa điểm',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    TextField(
+                      controller: controller,
+                      style: const TextStyle(color: Colors.white),
+
+                      onChanged: search,
+
+                      decoration: InputDecoration(
+                        hintText: 'Ví dụ: hung yen, ha noi...',
+                        hintStyle: TextStyle(color: Colors.white54),
+
+                        filled: true,
+                        fillColor: Colors.white10,
+
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide.none,
+                        ),
+
+                        prefixIcon: const Icon(
+                          Icons.location_on,
+                          color: Colors.white70,
+                        ),
+
+                        suffixIcon: isLoading
+                            ? const Padding(
+                                padding: EdgeInsets.all(14),
+                                child: SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              )
+                            : null,
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    if (suggestions.isNotEmpty)
+                      Container(
+                        constraints: const BoxConstraints(maxHeight: 300),
+
+                        decoration: BoxDecoration(
+                          color: Colors.white10,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: suggestions.length,
+
+                          itemBuilder: (context, index) {
+                            final item = suggestions[index];
+
+                            return ListTile(
+                              onTap: () => selectPlace(item),
+
+                              leading: const Icon(
+                                Icons.location_city,
+                                color: Colors.blueAccent,
+                              ),
+
+                              title: Text(
+                                item['display_name'],
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+
+                    const SizedBox(height: 16),
+
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                        },
+                        child: const Text(
+                          'Đóng',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // MANUAL ROUTE DIALOG
+  // nhập điểm đi + điểm đến
+  // ─────────────────────────────────────────────
+  Future<void> _showManualRouteDialog() async {
+    final startCtrl = TextEditingController();
+    final endCtrl = TextEditingController();
+
+    bool isLoading = false;
+
+    WeatherData? startWeather;
+    WeatherData? endWeather;
+
+    await showDialog(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            // load preview weather
+            Future<void> loadWeatherPreview() async {
+              final startText = startCtrl.text.trim();
+              final endText = endCtrl.text.trim();
+
+              try {
+                // điểm đi
+                if (startText.isNotEmpty) {
+                  final startLoc = await searchLocation(startText);
+
+                  if (startLoc != null) {
+                    startWeather = await fetchWeather(
+                      startLoc.latitude,
+                      startLoc.longitude,
+                    );
+                  }
+                }
+
+                // điểm đến
+                if (endText.isNotEmpty) {
+                  final endLoc = await searchLocation(endText);
+
+                  if (endLoc != null) {
+                    endWeather = await fetchWeather(
+                      endLoc.latitude,
+                      endLoc.longitude,
+                    );
+                  }
+                }
+
+                setModalState(() {});
+              } catch (e) {
+                print(e);
+              }
+            }
+
+            Future<void> handleRoute() async {
+              final startText = startCtrl.text.trim();
+              final endText = endCtrl.text.trim();
+
+              if (startText.isEmpty || endText.isEmpty) {
+                _toast('⚠ Hãy nhập điểm đi và điểm đến');
+                return;
+              }
+
+              setModalState(() {
+                isLoading = true;
+              });
+
+              try {
+                final startLoc = await searchLocation(startText);
+                final endLoc = await searchLocation(endText);
+
+                if (startLoc == null || endLoc == null) {
+                  setModalState(() {
+                    isLoading = false;
+                  });
+
+                  _toast('❌ Không tìm thấy địa điểm');
+                  return;
+                }
+
+                // load weather giống định vị
+                final weather = await fetchWeather(
+                  endLoc.latitude,
+                  endLoc.longitude,
+                );
+
+                Navigator.pop(context);
+
+                setState(() {
+                  _userLoc = startLoc;
+                  _selectedLoc = endLoc;
+
+                  _weather = weather;
+                });
+
+                // move tới điểm đầu
+                _mapCtrl.move(startLoc, 13);
+
+                _checkWeatherAlert(weather);
+
+                _toast(
+                  '📍 ${weather.city}: ${weather.temp}° - ${weather.desc}',
+                );
+
+                // tạo route
+                await _createRoute();
+              } catch (e) {
+                setModalState(() {
+                  isLoading = false;
+                });
+
+                _toast('❌ Lỗi tạo tuyến đường');
+              }
+            }
+
+            Widget weatherCard({
+              required WeatherData weather,
+              required IconData icon,
+              required Color color,
+            }) {
+              return Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: color.withOpacity(0.4)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(icon, color: color),
+
+                    const SizedBox(width: 12),
+
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            weather.city,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+
+                          const SizedBox(height: 4),
+
+                          Text(
+                            '${weather.temp}° • ${weather.desc}',
+                            style: const TextStyle(color: Colors.white70),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            return Dialog(
+              backgroundColor: Colors.transparent,
+              child: Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF152840),
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.alt_route, color: Colors.white),
+                          SizedBox(width: 10),
+                          Text(
+                            'Nhập tuyến đường',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      // điểm đi
+                      TextField(
+                        controller: startCtrl,
+                        style: const TextStyle(color: Colors.white),
+
+                        onSubmitted: (_) async {
+                          await loadWeatherPreview();
+                        },
+
+                        decoration: InputDecoration(
+                          hintText: 'Nhập điểm đi',
+                          hintStyle: const TextStyle(color: Colors.white54),
+                          filled: true,
+                          fillColor: Colors.white10,
+                          prefixIcon: const Icon(
+                            Icons.trip_origin,
+                            color: Colors.green,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // điểm đến
+                      TextField(
+                        controller: endCtrl,
+                        style: const TextStyle(color: Colors.white),
+
+                        onSubmitted: (_) async {
+                          await loadWeatherPreview();
+                        },
+
+                        decoration: InputDecoration(
+                          hintText: 'Nhập điểm đến',
+                          hintStyle: const TextStyle(color: Colors.white54),
+                          filled: true,
+                          fillColor: Colors.white10,
+                          prefixIcon: const Icon(
+                            Icons.location_on,
+                            color: Colors.red,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // weather preview điểm đi
+                      if (startWeather != null)
+                        weatherCard(
+                          weather: startWeather!,
+                          icon: Icons.trip_origin,
+                          color: Colors.green,
+                        ),
+
+                      // weather preview điểm đến
+                      if (endWeather != null)
+                        weatherCard(
+                          weather: endWeather!,
+                          icon: Icons.location_on,
+                          color: Colors.red,
+                        ),
+
+                      const SizedBox(height: 20),
+
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: isLoading ? null : handleRoute,
+
+                          icon: isLoading
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.alt_route),
+
+                          label: Text(
+                            isLoading ? 'Đang tạo tuyến...' : 'Tạo tuyến đường',
+                          ),
+
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 10),
+
+                      TextButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                        },
+                        child: const Text(
+                          'Đóng',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
         );
       },
     );
@@ -933,6 +1676,57 @@ class _HomeScreenState extends State<HomeScreen>
           margin: const EdgeInsets.only(bottom: 120, left: 32, right: 32),
         ),
       );
+  }
+
+  //ham gui notification (thong bao ve dien thoai)
+  Future<void> showNotification(String title, String body) async {
+    const AndroidNotificationDetails androidDetails =
+        AndroidNotificationDetails(
+          'weather_channel',
+          'Weather Alert',
+          importance: Importance.max,
+          priority: Priority.high,
+        );
+
+    const NotificationDetails notificationDetails = NotificationDetails(
+      android: androidDetails,
+    );
+
+    await flutterLocalNotificationsPlugin.show(
+      0,
+      title,
+      body,
+      notificationDetails,
+    );
+  }
+
+  //canh  bao
+  void _checkWeatherAlert(WeatherData w) async {
+    String? alert;
+
+    if (w.temp >= 30) {
+      alert =
+          "☀️ Thời tiết ở khu vực hiện đang rất nóng ${w.temp}°C. "
+          "Hãy hạn chế hoạt động ngoài trời trong thời gian dài, "
+          "bổ sung đủ nước và sử dụng áo chống nắng hoặc kem chống nắng để bảo vệ sức khỏe.";
+    }
+
+    if (w.rain > 0 || w.desc.toLowerCase().contains('mưa')) {
+      alert =
+          "🌧 Khu vực hiện có khả năng xuất hiện mưa. "
+          "Bạn nên mang theo ô hoặc áo mưa khi ra ngoài "
+          "để tránh thời tiết xấu ảnh hưởng đến việc di chuyển.";
+    }
+
+    setState(() {
+      _weatherAlert = alert;
+    });
+
+    if (alert != null) {
+      _toast(alert);
+
+      await showNotification("Cảnh báo thời tiết", alert);
+    }
   }
 
   // ─────────────────────────────────────────────────────
@@ -1017,28 +1811,12 @@ class _HomeScreenState extends State<HomeScreen>
           Text(
             _isTracking
                 ? 'Đang xác định vị trí...'
-                : 'Đang chờ vị trí tự động hoặc thêm khu vực mới',
+                : 'Đang chờ vị trí của bạn... Hãy bật định vị để xem thời tiết',
             textAlign: TextAlign.center,
             style: const TextStyle(
               color: Colors.white70,
               fontSize: 15,
               height: 1.6,
-            ),
-          ),
-          const SizedBox(height: 20),
-          TextButton.icon(
-            onPressed: _showSearchDialog,
-            icon: const Icon(Icons.add_location, color: Colors.white),
-            label: const Text(
-              'Thêm khu vực',
-              style: TextStyle(color: Colors.white),
-            ),
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              backgroundColor: Colors.white24,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
             ),
           ),
         ],
@@ -1107,7 +1885,7 @@ class _HomeScreenState extends State<HomeScreen>
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
             child: SizedBox(
-              width: double.infinity, // ✅ FIX LỖI CHÍNH
+              width: double.infinity,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1133,28 +1911,6 @@ class _HomeScreenState extends State<HomeScreen>
                         style: const TextStyle(
                           color: Colors.white54,
                           fontSize: 12,
-                        ),
-                      ),
-                      TextButton.icon(
-                        onPressed: _showSearchDialog,
-                        icon: const Icon(
-                          Icons.add_location,
-                          size: 16,
-                          color: Colors.white,
-                        ),
-                        label: const Text(
-                          'Thêm khu vực',
-                          style: TextStyle(color: Colors.white),
-                        ),
-                        style: TextButton.styleFrom(
-                          backgroundColor: Colors.white24,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
                         ),
                       ),
                     ],
@@ -1196,8 +1952,11 @@ class _HomeScreenState extends State<HomeScreen>
 
                   const SizedBox(height: 20),
 
-                  _hourlyForecast(w),
+                  if (_weatherAlert != null) _alertBox(_weatherAlert!),
 
+                  const SizedBox(height: 20),
+
+                  _hourlyForecast(w),
                   const SizedBox(height: 20),
 
                   _dailyForecast(w),
@@ -1208,6 +1967,36 @@ class _HomeScreenState extends State<HomeScreen>
                   _airQuality(w),
                   _sunChart(w),
                 ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _alertBox(String text) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.orange.withOpacity(0.18),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.orange.withOpacity(0.5)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.warning_amber_rounded, color: Colors.orange),
+
+          const SizedBox(width: 12),
+
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ),
@@ -1227,7 +2016,7 @@ class _HomeScreenState extends State<HomeScreen>
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, color: Colors.white70, size: 16),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
           Text(value, style: const TextStyle(color: Colors.white)),
         ],
       ),
@@ -1259,7 +2048,7 @@ class _HomeScreenState extends State<HomeScreen>
                 final h = w.hourly[i];
 
                 return Container(
-                  width: 60,
+                  width: 40,
                   margin: const EdgeInsets.only(right: 10),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1366,7 +2155,7 @@ class _HomeScreenState extends State<HomeScreen>
                   _weather = w;
                   _loadingWeather = false;
                 });
-
+                _checkWeatherAlert(w);
                 _toast('📍 ${w.city}: ${w.temp}° - ${w.desc}');
               } catch (e) {
                 setState(() {
@@ -1384,7 +2173,19 @@ class _HomeScreenState extends State<HomeScreen>
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.example.weather_map',
             ),
-
+            // ───────────────── ROUTE ─────────────────
+            if (_routePoints.isNotEmpty)
+              PolylineLayer(
+                polylines: [
+                  Polyline(
+                    points: _routePoints,
+                    strokeWidth: 7,
+                    strokeCap: StrokeCap.round,
+                    strokeJoin: StrokeJoin.round,
+                    color: _weatherOptimized ? Colors.orange : Colors.blue,
+                  ),
+                ],
+              ),
             // ───────────────── USER LOCATION ─────────────────
             if (_userLoc != null)
               MarkerLayer(
@@ -1512,7 +2313,7 @@ class _HomeScreenState extends State<HomeScreen>
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
 
               decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.9),
+                color: _weatherOptimized ? Colors.orange : Colors.blue,
                 borderRadius: BorderRadius.circular(14),
               ),
 
@@ -1568,14 +2369,50 @@ class _HomeScreenState extends State<HomeScreen>
             tooltip: 'Tìm địa điểm',
             onTap: _showSearchDialog,
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
           // Locate button with pulse when active
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
+          //nút chỉ đường
+          _MapCtrlBtn(
+            icon: Icons.alt_route,
+            tooltip: 'Chỉ đường',
+            onTap: () async {
+              // có đủ vị trí rồi -> tạo route luôn
+              if (_userLoc != null && _selectedLoc != null) {
+                await _createRoute();
+                return;
+              }
 
+              // chưa có -> nhập tay
+              await _showManualRouteDialog();
+            },
+          ),
+          //Phan tich thoi thoi tiet
+          const SizedBox(width: 4),
+
+          _MapCtrlBtn(
+            icon: Icons.cloudy_snowing,
+            tooltip: 'Phân tích thời tiết, tối ưu tuyến đường',
+            onTap: () async {
+              // chưa có tuyến đường
+              if (_routePoints.isEmpty) {
+                _toast('⚠ Hãy tạo tuyến đường trước');
+                return;
+              }
+
+              // chưa có điểm đi / đến
+              if (_userLoc == null || _selectedLoc == null) {
+                _toast('⚠ Thiếu điểm đi hoặc điểm đến');
+                return;
+              }
+
+              await _createWeatherOptimizedRoute();
+            },
+          ),
           // ☁️ CLICK MAP WEATHER MODE
           _MapCtrlBtn(
             icon: Icons.touch_app,
-            tooltip: 'Chạm bản đồ xem thời tiết',
+            tooltip: 'Chạm bất kỳ một điểm để xem thời tiết',
 
             active: _pickWeatherMode,
 
@@ -1598,9 +2435,14 @@ class _HomeScreenState extends State<HomeScreen>
             active: _isTracking,
             pulseController: _isTracking ? _pulseCtrl : null,
           ),
-          const SizedBox(width: 6),
+          _MapCtrlBtn(
+            icon: Icons.refresh,
+            tooltip: 'Làm mới',
+            onTap: _resetApp,
+          ),
+          const SizedBox(width: 4),
           _MapCtrlBtn(icon: Icons.remove, tooltip: 'Thu nhỏ', onTap: _zoomOut),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
           _MapCtrlBtn(icon: Icons.add, tooltip: 'Phóng to', onTap: _zoomIn),
         ],
       ),
@@ -1688,8 +2530,8 @@ class _MapCtrlBtn extends StatelessWidget {
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 220),
-          width: 46,
-          height: 46,
+          width: 44,
+          height: 44,
           decoration: BoxDecoration(
             color: active
                 ? const Color(0xFF2E7D32).withOpacity(0.9)
@@ -1705,7 +2547,7 @@ class _MapCtrlBtn extends StatelessWidget {
           child: Icon(
             icon,
             color: active ? Colors.white : Colors.white.withOpacity(0.85),
-            size: 22,
+            size: 20,
           ),
         ),
       ),
