@@ -9,9 +9,8 @@ import 'dart:ui';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:diacritic/diacritic.dart';
 
-// ─────────────────────────────────────────────────────────
 // CONFIG
-// ─────────────────────────────────────────────────────────
+
 const String owmApiKey =
     'fef5f16204bc3c6a7fd7cbc31fc6ea74'; // API key thật từ openweathermap.org
 const LatLng kDefaultCenter = LatLng(21.0285, 105.8412); // Hà Nội
@@ -39,9 +38,8 @@ Future<void> main() async {
   runApp(const WeatherMapApp());
 }
 
-// ─────────────────────────────────────────────────────────
 // APP ROOT
-// ─────────────────────────────────────────────────────────
+//Lớp dự báo thời tiết theo giờ
 class HourlyForecast {
   final int temp;
   final String icon;
@@ -50,6 +48,7 @@ class HourlyForecast {
   HourlyForecast({required this.temp, required this.icon, required this.time});
 }
 
+//Lớp dự báo thời tiết theo ngày.
 class ForecastDay {
   final String shortDay;
   final String icon;
@@ -62,6 +61,7 @@ class ForecastDay {
   });
 }
 
+//Lớp gốc của app.
 class WeatherMapApp extends StatelessWidget {
   const WeatherMapApp({super.key});
 
@@ -76,9 +76,7 @@ class WeatherMapApp extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────────────────────
-// DATA MODELS
-// ─────────────────────────────────────────────────────────
+//Lớp mô hình dữ liệu dùng để lưu toàn bộ thông tin thời tiết của một địa điểm.(DATA MODELS)
 class WeatherData {
   final String city;
   final int temp;
@@ -118,16 +116,14 @@ class WeatherData {
   });
 }
 
-// ─────────────────────────────────────────────────────────
-// HELPERS
-// ─────────────────────────────────────────────────────────
+//hàm kiểm tra hiện tại là ban ngày hay ban đêm.
 bool isNight(int sunrise, int sunset) {
   final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
   return now < sunrise || now > sunset;
 }
 
+//Khai báo các mảng chứa tên ngày trong tuần.
 const _shortDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
 const _fullDays = [
   'Monday',
   'Tuesday',
@@ -138,11 +134,13 @@ const _fullDays = [
   'Sunday',
 ];
 
+//Lấy ngày hiện tại và chuyển thành chuỗi tiếng Việt.
 String todayLabel() {
   final now = DateTime.now();
   return '${_fullDays[now.weekday - 1]}, ${now.day} tháng ${now.month} ${now.year}';
 }
 
+//Chuyển mã icon của OpenWeatherMap thành Emoji.
 String _owmIconToEmoji(String? icon) {
   if (icon == null) return '🌡';
   final id = icon.replaceAll('d', '').replaceAll('n', '');
@@ -160,6 +158,8 @@ String _owmIconToEmoji(String? icon) {
   return map[id] ?? '🌡';
 }
 
+//.................................................................................
+//Widget hiển thị chi tiết thời tiết.
 Widget _weatherDetails(WeatherData w) {
   Widget item(IconData icon, String title, String value) {
     return Expanded(
@@ -259,6 +259,7 @@ Widget _weatherDetails(WeatherData w) {
   );
 }
 
+//Widget hiển thị chất lượng không khí (AQI - Air Quality Index).
 Widget _airQuality(WeatherData w) {
   Color aqiColor(int aqi) {
     switch (aqi) {
@@ -353,6 +354,7 @@ Widget _airQuality(WeatherData w) {
   );
 }
 
+//Widget hiển thị biểu đồ mặt trời mọc và mặt trời lặn.
 Widget _sunChart(WeatherData w) {
   final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
@@ -450,6 +452,8 @@ Widget _sunChart(WeatherData w) {
   );
 }
 
+//................................................................................
+//Hàm giả lập dữ liệu thời tiết (Mock Data Function).
 WeatherData _mockWeather(double lat) {
   final now = DateTime.now();
   final icons = ['☁️', '⛅', '🌧', '☀️'];
@@ -493,6 +497,7 @@ WeatherData _mockWeather(double lat) {
   );
 }
 
+//Hàm lấy dữ liệu thời tiết từ API OpenWeatherMap.
 Future<WeatherData> fetchWeather(double lat, double lon) async {
   if (owmApiKey == 'demo') {
     await Future.delayed(const Duration(milliseconds: 700));
@@ -578,6 +583,7 @@ Future<WeatherData> fetchWeather(double lat, double lon) async {
   }
 }
 
+//Hàm tiện ích (Utility Functions) dùng để xử lý và hiển thị dữ liệu.
 String formatTime(int unix) {
   final dt = DateTime.fromMillisecondsSinceEpoch(unix * 1000);
   return "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}";
@@ -600,7 +606,7 @@ String getAqiText(int aqi) {
   }
 }
 
-//@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+//Hàm tìm kiếm tọa độ địa lý theo tên địa điểm (Geocoding Function).
 Future<LatLng?> searchLocation(String query) async {
   try {
     final res = await http.get(
@@ -624,9 +630,8 @@ Future<LatLng?> searchLocation(String query) async {
   }
 }
 
-// ─────────────────────────────────────────────────────────
-// HOME SCREEN
-// ─────────────────────────────────────────────────────────
+//LỚP.................................................................................
+//Lớp giao diện (HOME SCREEN)
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -634,6 +639,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
+//Lớp quản lý toàn bộ trạng thái của màn hình HomeScreen
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
   final MapController _mapCtrl = MapController();
@@ -680,8 +686,151 @@ class _HomeScreenState extends State<HomeScreen>
     super.dispose();
   }
 
-  //Hàm
-  //resec
+  //Chuẩn hóa chuỗi tiếng việt
+  String normalizeVietnamese(String text) {
+    return removeDiacritics(text.toLowerCase()).trim();
+  }
+
+  //HÀM.......................................................................................
+  //Hàm định vị GPS thời gian thực.(LOCATION TRACKING)
+  Future<void> _toggleLocate() async {
+    // nếu đang tracking => tắt
+    if (_isTracking) {
+      _stopTracking();
+
+      _toast('❌ Đã tắt định vị');
+
+      return;
+    }
+
+    try {
+      // kiểm tra GPS
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+
+      if (!serviceEnabled) {
+        _toast('⚠ Hãy bật GPS/Vị trí');
+
+        await Geolocator.openLocationSettings();
+
+        return;
+      }
+
+      // kiểm tra quyền
+      LocationPermission permission = await Geolocator.checkPermission();
+
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied) {
+        _toast('❌ Quyền vị trí bị từ chối');
+        return;
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        _toast('❌ Hãy cấp quyền vị trí trong cài đặt');
+
+        await Geolocator.openAppSettings();
+
+        return;
+      }
+
+      // bật tracking
+      setState(() {
+        _isTracking = true;
+        _loadingWeather = true;
+      });
+
+      _pulseCtrl.repeat();
+
+      // lấy vị trí hiện tại ngay lập tức
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      final loc = LatLng(pos.latitude, pos.longitude);
+
+      // move map
+      _mapCtrl.move(loc, 16);
+
+      // lấy weather
+      final w = await fetchWeather(pos.latitude, pos.longitude);
+
+      if (!mounted) return;
+
+      setState(() {
+        _userLoc = loc;
+        _selectedLoc = loc;
+        _weather = w;
+
+        _zoom = 16;
+        _loadingWeather = false;
+      });
+      _checkWeatherAlert(w);
+      _toast('📍 ${w.city}');
+
+      // stream vị trí realtime
+      _posSub?.cancel();
+
+      _posSub =
+          Geolocator.getPositionStream(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              distanceFilter: 10,
+            ),
+          ).listen((Position position) {
+            final newLoc = LatLng(position.latitude, position.longitude);
+
+            if (!mounted) return;
+
+            setState(() {
+              _userLoc = newLoc;
+            });
+
+            // map follow user
+            if (_isTracking) {
+              _mapCtrl.move(newLoc, _zoom);
+            }
+          });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _loadingWeather = false;
+        _isTracking = false;
+      });
+
+      _pulseCtrl.stop();
+
+      _toast('❌ Không lấy được vị trí');
+    }
+  }
+
+  // STOP TRACKING
+  void _stopTracking() {
+    _posSub?.cancel();
+
+    _pulseCtrl.stop();
+
+    setState(() {
+      _isTracking = false;
+    });
+  }
+
+  //Hàm phóng to , thu nhỏ map(MAP CONTROLS)
+  void _zoomIn() {
+    _zoom = (_zoom + 1).clamp(2.0, 18.0);
+
+    _mapCtrl.move(_mapCtrl.camera.center, _zoom);
+  }
+
+  void _zoomOut() {
+    _zoom = (_zoom - 1).clamp(2.0, 18.0);
+
+    _mapCtrl.move(_mapCtrl.camera.center, _zoom);
+  }
+
+  //Hàm resect app về trạng thái ban đầu.
   void _resetApp() {
     // tắt tracking
     _posSub?.cancel();
@@ -718,7 +867,7 @@ class _HomeScreenState extends State<HomeScreen>
     _toast('🔄 Đã làm mới ứng dụng');
   }
 
-  //Tranh thoi tiet
+  //Hàm phân tích thời tiết, tối ưu tuyến đường
   Future<void> _createWeatherOptimizedRoute() async {
     if (_userLoc == null || _selectedLoc == null) {
       _toast('⚠ Hãy chọn điểm đến');
@@ -834,11 +983,8 @@ class _HomeScreenState extends State<HomeScreen>
       _toast('⚠ Lỗi tối ưu thời tiết → chuyển sang tuyến thường');
     }
   }
-  //Chỉ đường
 
-  // ─────────────────────────────────────────────
-  // TẠO TUYẾN ĐƯỜNG THƯỜNG
-  // ─────────────────────────────────────────────
+  //Hàm chỉ đường
   Future<void> _createRoute() async {
     if (_userLoc == null || _selectedLoc == null) {
       _toast('⚠ Hãy chọn điểm đi và điểm đến');
@@ -890,185 +1036,7 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  // ─────────────────────────────────────────────
-  // LOCATION TRACKING
-  // ─────────────────────────────────────────────
-  Future<void> _toggleLocate() async {
-    // nếu đang tracking => tắt
-    if (_isTracking) {
-      _stopTracking();
-
-      _toast('❌ Đã tắt định vị');
-
-      return;
-    }
-
-    try {
-      // kiểm tra GPS
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-
-      if (!serviceEnabled) {
-        _toast('⚠ Hãy bật GPS/Vị trí');
-
-        await Geolocator.openLocationSettings();
-
-        return;
-      }
-
-      // kiểm tra quyền
-      LocationPermission permission = await Geolocator.checkPermission();
-
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-
-      if (permission == LocationPermission.denied) {
-        _toast('❌ Quyền vị trí bị từ chối');
-        return;
-      }
-
-      if (permission == LocationPermission.deniedForever) {
-        _toast('❌ Hãy cấp quyền vị trí trong cài đặt');
-
-        await Geolocator.openAppSettings();
-
-        return;
-      }
-
-      // bật tracking
-      setState(() {
-        _isTracking = true;
-        _loadingWeather = true;
-      });
-
-      _pulseCtrl.repeat();
-
-      // lấy vị trí hiện tại ngay lập tức
-      final pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
-
-      final loc = LatLng(pos.latitude, pos.longitude);
-
-      // move map
-      _mapCtrl.move(loc, 16);
-
-      // lấy weather
-      final w = await fetchWeather(pos.latitude, pos.longitude);
-
-      if (!mounted) return;
-
-      setState(() {
-        _userLoc = loc;
-        _selectedLoc = loc;
-        _weather = w;
-
-        _zoom = 16;
-        _loadingWeather = false;
-      });
-      _checkWeatherAlert(w);
-      _toast('📍 ${w.city}');
-
-      // stream vị trí realtime
-      _posSub?.cancel();
-
-      _posSub =
-          Geolocator.getPositionStream(
-            locationSettings: const LocationSettings(
-              accuracy: LocationAccuracy.high,
-              distanceFilter: 10,
-            ),
-          ).listen((Position position) {
-            final newLoc = LatLng(position.latitude, position.longitude);
-
-            if (!mounted) return;
-
-            setState(() {
-              _userLoc = newLoc;
-            });
-
-            // map follow user
-            if (_isTracking) {
-              _mapCtrl.move(newLoc, _zoom);
-            }
-          });
-    } catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        _loadingWeather = false;
-        _isTracking = false;
-      });
-
-      _pulseCtrl.stop();
-
-      _toast('❌ Không lấy được vị trí');
-    }
-  }
-
-  // ─────────────────────────────────────────────
-  // STOP TRACKING
-  // ─────────────────────────────────────────────
-  void _stopTracking() {
-    _posSub?.cancel();
-
-    _pulseCtrl.stop();
-
-    setState(() {
-      _isTracking = false;
-    });
-  }
-
-  // ─────────────────────────────────────────────
-  // MAP CONTROLS
-  // ─────────────────────────────────────────────
-  void _zoomIn() {
-    _zoom = (_zoom + 1).clamp(2.0, 18.0);
-
-    _mapCtrl.move(_mapCtrl.camera.center, _zoom);
-  }
-
-  void _zoomOut() {
-    _zoom = (_zoom - 1).clamp(2.0, 18.0);
-
-    _mapCtrl.move(_mapCtrl.camera.center, _zoom);
-  }
-
-  // ─────────────────────────────────────────────
-  // SEARCH LOCATION
-  // ─────────────────────────────────────────────
-  // Future<LatLng?> searchLocation(String query) async {
-  //   try {
-  //     final res = await http.get(
-  //       Uri.parse(
-  //         'https://nominatim.openstreetmap.org/search?q=$query&format=json&limit=1',
-  //       ),
-  //       headers: {'User-Agent': 'weather-app'},
-  //     );
-
-  //     if (res.statusCode != 200) return null;
-
-  //     final data = jsonDecode(res.body);
-
-  //     if (data.isEmpty) return null;
-
-  //     final lat = double.parse(data[0]['lat']);
-  //     final lon = double.parse(data[0]['lon']);
-
-  //     return LatLng(lat, lon);
-  //   } catch (e) {
-  //     return null;
-  //   }
-  // }
-
-  // ─────────────────────────────────────────────
-  String normalizeVietnamese(String text) {
-    return removeDiacritics(text.toLowerCase()).trim();
-  }
-
-  // ─────────────────────────────────────────────
-  // SEARCH PLACE
-  // ─────────────────────────────────────────────
+  //Hàm tìm kiếm địa điểm và trả về danh sách gợi ý.(SEARCH PLACE)
   Future<List<Map<String, dynamic>>> searchSuggestions(String query) async {
     if (query.trim().isEmpty) return [];
 
@@ -1111,9 +1079,7 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  // ─────────────────────────────────────────────
-  // SEARCH LOCATION
-  // ─────────────────────────────────────────────
+  //Hàm tìm kiếm tọa độ địa điểm theo tên(SEARCH LOCATION)
   Future<LatLng?> searchLocation(String query) async {
     try {
       final results = await searchSuggestions(query);
@@ -1133,9 +1099,7 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  // ─────────────────────────────────────────────
-  // SEARCH DIALOG
-  // ─────────────────────────────────────────────
+  //Hàm hiển thị hộp thoại tìm kiếm(SEARCH DIALOG)
   Future<void> _showSearchDialog() async {
     final controller = TextEditingController();
 
@@ -1340,10 +1304,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ─────────────────────────────────────────────
-  // MANUAL ROUTE DIALOG
-  // nhập điểm đi + điểm đến
-  // ─────────────────────────────────────────────
+  //Hàm nhập điểm đi + điểm đến để chỉ đường(MANUAL ROUTE DIALOG)
   Future<void> _showManualRouteDialog() async {
     final startCtrl = TextEditingController();
     final endCtrl = TextEditingController();
@@ -1656,9 +1617,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ─────────────────────────────────────────────
-  // TOAST
-  // ─────────────────────────────────────────────
+  //Hàm hiển thị thông báo tạm thời(TOAST)
   void _toast(String msg, {int seconds = 2}) {
     if (!mounted) return;
 
@@ -1678,7 +1637,7 @@ class _HomeScreenState extends State<HomeScreen>
       );
   }
 
-  //ham gui notification (thong bao ve dien thoai)
+  //Hàm gửi notification (thông báo về điện thoại)
   Future<void> showNotification(String title, String body) async {
     const AndroidNotificationDetails androidDetails =
         AndroidNotificationDetails(
@@ -1700,7 +1659,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  //canh  bao
+  //Hàm cảnh  báo thời tiết
   void _checkWeatherAlert(WeatherData w) async {
     String? alert;
 
@@ -1729,9 +1688,8 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  // ─────────────────────────────────────────────────────
-  // BUILD
-  // ─────────────────────────────────────────────────────
+  //GIAO DIỆN......................................................................................
+  //Giao diện map(BUILD)
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1774,9 +1732,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────
-  // WEATHER PANEL
-  // ─────────────────────────────────────────────────────
+  //Giao diện thời tiết(WEATHER PANEL)
   Widget _buildWeatherPanel() {
     return Container(
       width: double.infinity,
@@ -1801,6 +1757,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  //Giao diện khi chưa ấn định vị
   Widget _buildWeatherEmpty() {
     return Center(
       child: Column(
@@ -1824,6 +1781,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  //Hiển thị chi tiết thời tiết
   Widget _buildWeatherContent(WeatherData w) {
     final bool night = isNight(w.sunrise, w.sunset);
 
@@ -1975,6 +1933,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  //Hiển thị hộp cảnh báo thời tiết
   Widget _alertBox(String text) {
     return Container(
       width: double.infinity,
@@ -2005,6 +1964,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  //Ô thông tin hiển thị thông số thời tiết(độ ẩm, nhiệt độ,.......)
   Widget _infoBox(IconData icon, String value) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -2023,6 +1983,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  //Hiển thị thời tiết theo giờ
   Widget _hourlyForecast(WeatherData w) {
     return Container(
       padding: const EdgeInsets.all(12),
@@ -2076,6 +2037,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  //Hiển thị thời tiết theo ngày
   Widget _dailyForecast(WeatherData w) {
     return Container(
       padding: const EdgeInsets.all(12),
@@ -2119,13 +2081,11 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────
-  // MAP PANEL
-  // ─────────────────────────────────────────────────────
+  //Xây dựng giao diện bản đồ(MAP PANEL)
   Widget _buildMapPanel() {
     return Stack(
       children: [
-        // ───────────────── MAP ─────────────────
+        // ───── MAP ─────
         FlutterMap(
           mapController: _mapCtrl,
 
@@ -2168,12 +2128,12 @@ class _HomeScreenState extends State<HomeScreen>
           ),
 
           children: [
-            // ───────────────── TILE ─────────────────
+            // ───── TILE ─────
             TileLayer(
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.example.weather_map',
             ),
-            // ───────────────── ROUTE ─────────────────
+            // ───── ROUTE ─────
             if (_routePoints.isNotEmpty)
               PolylineLayer(
                 polylines: [
@@ -2186,7 +2146,7 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ],
               ),
-            // ───────────────── USER LOCATION ─────────────────
+            // ───── USER LOCATION ─────
             if (_userLoc != null)
               MarkerLayer(
                 markers: [
@@ -2199,7 +2159,7 @@ class _HomeScreenState extends State<HomeScreen>
                 ],
               ),
 
-            // ───────────────── WEATHER MARKER ─────────────────
+            // ───── WEATHER MARKER ─────
             if (_selectedLoc != null)
               MarkerLayer(
                 markers: [
@@ -2266,7 +2226,7 @@ class _HomeScreenState extends State<HomeScreen>
           ],
         ),
 
-        // ───────────────── LOADING ─────────────────
+        // ───── LOADING ─────
         if (_loadingWeather)
           Positioned(
             top: 20,
@@ -2303,7 +2263,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
 
-        // ───────────────── TOP MODE INFO ─────────────────
+        // ───── TOP MODE INFO ─────
         if (_pickWeatherMode)
           Positioned(
             top: 90,
@@ -2332,7 +2292,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
 
-        // ───────────────── CONTROL BAR ─────────────────
+        // ───── CONTROL BAR ─────
         Positioned(
           bottom: 20,
           left: 0,
@@ -2343,9 +2303,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ─────────────────────────────────────────────────────
-  // CONTROL BAR
-  // ─────────────────────────────────────────────────────
+  //Các nút chức năng trên map(CONTROL BAR)
   Widget _buildControlBar() {
     return Container(
       padding: const EdgeInsets.all(7),
@@ -2409,7 +2367,7 @@ class _HomeScreenState extends State<HomeScreen>
               await _createWeatherOptimizedRoute();
             },
           ),
-          // ☁️ CLICK MAP WEATHER MODE
+          // CLICK MAP WEATHER MODE
           _MapCtrlBtn(
             icon: Icons.touch_app,
             tooltip: 'Chạm bất kỳ một điểm để xem thời tiết',
@@ -2428,6 +2386,7 @@ class _HomeScreenState extends State<HomeScreen>
               );
             },
           ),
+          //Định vị
           _MapCtrlBtn(
             icon: Icons.my_location,
             tooltip: _isTracking ? 'Tắt định vị' : 'Định vị',
@@ -2435,11 +2394,13 @@ class _HomeScreenState extends State<HomeScreen>
             active: _isTracking,
             pulseController: _isTracking ? _pulseCtrl : null,
           ),
+          //Resec
           _MapCtrlBtn(
             icon: Icons.refresh,
             tooltip: 'Làm mới',
             onTap: _resetApp,
           ),
+          //Phóng to,thu nhỏ
           const SizedBox(width: 4),
           _MapCtrlBtn(icon: Icons.remove, tooltip: 'Thu nhỏ', onTap: _zoomOut),
           const SizedBox(width: 4),
@@ -2450,16 +2411,13 @@ class _HomeScreenState extends State<HomeScreen>
   }
 }
 
-// ─────────────────────────────────────────────────────────
-// REUSABLE WIDGETS
-// ─────────────────────────────────────────────────────────
-
-/// Blue pulsing dot for user location
+//Hiển thị chấm định vị trên bản đồ xác định vị trí người dùng
 class _LocationDot extends StatefulWidget {
   @override
   State<_LocationDot> createState() => _LocationDotState();
 }
 
+//Lớp quản lý hiệu ứng chấm vị trí GPS.
 class _LocationDotState extends State<_LocationDot>
     with SingleTickerProviderStateMixin {
   late AnimationController _ctrl;
@@ -2506,7 +2464,7 @@ class _LocationDotState extends State<_LocationDot>
   }
 }
 
-/// A single square button in the map control bar
+//Khai báo widget tạo nút điều khiển trên bản đồ(1 ô hình chữ nhật)
 class _MapCtrlBtn extends StatelessWidget {
   final IconData icon;
   final String tooltip;

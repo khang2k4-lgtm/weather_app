@@ -3,7 +3,9 @@ plugins {
     id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
 }
-
+tasks.withType(JavaCompile) {
+    options.compilerArgs += ["-Xlint:-options"]
+}
 android {
     namespace = "com.example.weatherapp"
 
